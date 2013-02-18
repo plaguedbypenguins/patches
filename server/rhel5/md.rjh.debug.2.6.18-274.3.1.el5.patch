@@ -1,0 +1,24 @@
+--- ../linux-2.6.18-274.3.1.el5.x86_64/drivers/md/raid5.c	2012-02-16 23:58:23.000000000 +1100
++++ drivers/md/raid5.c	2012-02-22 19:43:58.000000000 +1100
+@@ -3607,8 +3641,12 @@ static int run(mddev_t *mddev)
+ 
+ 	int stripe_size = conf->chunk_size * (conf->previous_raid_disks - conf->max_degraded);
+ 
++	printk("rjh: stripe_size = %d, %s:  pre: max_sectors %d, max_hw_sectors %d, max_segment_size %d, max_hw_segments %d, max_phys_segments %d, hardsect_size %d\n", stripe_size, mdname(mddev), mddev->queue->max_sectors, mddev->queue->max_hw_sectors, mddev->queue->max_segment_size, mddev->queue->max_hw_segments, mddev->queue->max_phys_segments, mddev->queue->hardsect_size);
++
+ 	/* in order to support large I/Os */
+ 	blk_queue_max_sectors(mddev->queue, stripe_size >> 9);
++	printk("rjh: stripe_size = %d, %s:  mid: max_sectors %d, max_hw_sectors %d, max_segment_size %d, max_hw_segments %d, max_phys_segments %d, hardsect_size %d\n", stripe_size, mdname(mddev), mddev->queue->max_sectors, mddev->queue->max_hw_sectors, mddev->queue->max_segment_size, mddev->queue->max_hw_segments, mddev->queue->max_phys_segments, mddev->queue->hardsect_size);
++
+ 	/* KTVM: set default max_sectors the same as the max_hw_sectors set above */
+ 	mddev->queue->max_sectors = mddev->queue->max_hw_sectors;
+ 	printk("%s: setting max_sectors = %d, max_hw_sectors = %d\n", mdname(mddev), mddev->queue->max_sectors, mddev->queue->max_hw_sectors);
+@@ -3616,6 +3654,8 @@ static int run(mddev_t *mddev)
+ 	mddev->queue->max_phys_segments = stripe_size >> PAGE_SHIFT;
+ 	mddev->queue->max_hw_segments = stripe_size >> PAGE_SHIFT;;
+ 
++	printk("rjh: stripe_size = %d, %s: post: max_sectors %d, max_hw_sectors %d, max_segment_size %d, max_hw_segments %d, max_phys_segments %d, hardsect_size %d\n", stripe_size, mdname(mddev), mddev->queue->max_sectors, mddev->queue->max_hw_sectors, mddev->queue->max_segment_size, mddev->queue->max_hw_segments, mddev->queue->max_phys_segments, mddev->queue->hardsect_size);
++
+ 	/* raid5 device is able to do zcopy right now. */
+ 	mddev->queue->backing_dev_info.capabilities |= BDI_CAP_PAGE_CONSTANT_WRITE;
+ 

@@ -1,0 +1,58 @@
+diff -ruNp perf.orig/Makefile perf/Makefile
+--- perf.orig/Makefile	2012-06-21 23:28:14.000000000 +1000
++++ perf/Makefile	2012-06-21 23:27:00.000000000 +1000
+@@ -92,7 +92,7 @@ endif
+ 
+ CFLAGS = -fno-omit-frame-pointer -ggdb3 -Wall -Wextra -std=gnu99 $(CFLAGS_WERROR) $(CFLAGS_OPTIMIZE) -D_FORTIFY_SOURCE=2 $(EXTRA_WARNINGS) $(EXTRA_CFLAGS)
+ EXTLIBS = -lpthread -lrt -lelf -lm
+-ALL_CFLAGS = $(CFLAGS) -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64
++ALL_CFLAGS = $(CFLAGS) -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 -DRJH_HACK
+ ALL_LDFLAGS = $(LDFLAGS)
+ STRIP ?= strip
+ 
+diff -ruNp perf.orig/builtin-test.c perf/builtin-test.c
+--- perf.orig/builtin-test.c	2012-06-21 23:28:35.000000000 +1000
++++ perf/builtin-test.c	2012-06-21 23:25:13.000000000 +1000
+@@ -975,6 +975,7 @@ static int test__parse_events(void)
+ 	return ret;
+ }
+ 
++#ifndef RJH_HACK // rjh - doesn't compile on centos5
+ static int sched__get_first_possible_cpu(pid_t pid, cpu_set_t **maskp,
+ 					 size_t *sizep)
+ {
+@@ -1012,6 +1013,7 @@ realloc:
+ 
+ 	return cpu;
+ }
++#endif
+ 
+ static int test__PERF_RECORD(void)
+ {
+@@ -1089,12 +1091,16 @@ static int test__PERF_RECORD(void)
+ 	evsel->attr.sample_type |= PERF_SAMPLE_TIME;
+ 	perf_evlist__config_attrs(evlist, &opts);
+ 
++#ifdef RJH_HACK // rjh - doesn't compile on centos5
++err = 0;
++#else
+ 	err = sched__get_first_possible_cpu(evlist->workload.pid, &cpu_mask,
+ 					    &cpu_mask_size);
+ 	if (err < 0) {
+ 		pr_debug("sched__get_first_possible_cpu: %s\n", strerror(errno));
+ 		goto out_delete_evlist;
+ 	}
++#endif
+ 
+ 	cpu = err;
+ 
+@@ -1297,7 +1303,9 @@ found_exit:
+ out_err:
+ 	perf_evlist__munmap(evlist);
+ out_free_cpu_mask:
++#ifndef RJH_HACK // rjh - doesn't compile on cenots5
+ 	CPU_FREE(cpu_mask);
++#endif
+ out_delete_evlist:
+ 	perf_evlist__delete(evlist);
+ out:

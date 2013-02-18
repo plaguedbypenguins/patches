@@ -1,0 +1,682 @@
+diff -ruNp linux-2.6.32.43.orig/arch/x86/include/asm/dma.h linux-2.6.32.43/arch/x86/include/asm/dma.h
+--- linux-2.6.32.43.orig/arch/x86/include/asm/dma.h	2011-07-23 18:53:29.000000000 +1000
++++ linux-2.6.32.43/arch/x86/include/asm/dma.h	2011-07-23 18:53:52.000000000 +1000
+@@ -78,10 +78,10 @@
+ #else
+ 
+ /* 16MB ISA DMA zone */
+-#define MAX_DMA_PFN   ((16 * 1024 * 1024) >> PAGE_SHIFT)
++#define MAX_DMA_PFN   ((0 * 1024 * 1024) >> PAGE_SHIFT)
+ 
+ /* 4GB broken PCI/AGP hardware bus master zone */
+-#define MAX_DMA32_PFN ((4UL * 1024 * 1024 * 1024) >> PAGE_SHIFT)
++#define MAX_DMA32_PFN ((0 * 1024 * 1024 * 1024) >> PAGE_SHIFT)
+ 
+ /* Compat define for old dma zone */
+ #define MAX_DMA_ADDRESS ((unsigned long)__va(MAX_DMA_PFN << PAGE_SHIFT))
+diff -ruNp linux-2.6.32.41.orig/drivers/block/loop.c linux-2.6.32.41/drivers/block/loop.c
+--- linux-2.6.32.41.orig/drivers/block/loop.c	2011-06-07 15:09:20.000000000 +1000
++++ linux-2.6.32.41/drivers/block/loop.c	2011-06-07 15:07:05.000000000 +1000
+@@ -786,8 +786,9 @@ static int loop_set_fd(struct loop_devic
+ 	if (S_ISREG(inode->i_mode) || S_ISBLK(inode->i_mode)) {
+ 		const struct address_space_operations *aops = mapping->a_ops;
+ 
+-		if (aops->write_begin)
+-			lo_flags |= LO_FLAGS_USE_AOPS;
++// rjh
++//		if (aops->write_begin)
++//			lo_flags |= LO_FLAGS_USE_AOPS;
+ 		if (!(lo_flags & LO_FLAGS_USE_AOPS) && !file->f_op->write)
+ 			lo_flags |= LO_FLAGS_READ_ONLY;
+ 
+diff -ruNp linux-2.6.32.41.orig/fs/dcache.c linux-2.6.32.41/fs/dcache.c
+--- linux-2.6.32.41.orig/fs/dcache.c	2011-06-07 15:09:21.000000000 +1000
++++ linux-2.6.32.41/fs/dcache.c	2011-06-07 15:07:05.000000000 +1000
+@@ -2086,7 +2086,7 @@ Elong:
+  */
+ SYSCALL_DEFINE2(getcwd, char __user *, buf, unsigned long, size)
+ {
+-	int error;
++	int error, tryL = 0, tryU = 0, tryN = 5;
+ 	struct path pwd, root;
+ 	char *page = (char *) __get_free_page(GFP_USER);
+ 
+@@ -2100,6 +2100,7 @@ SYSCALL_DEFINE2(getcwd, char __user *, b
+ 	path_get(&root);
+ 	read_unlock(&current->fs->lock);
+ 
++tryAgain:
+ 	error = -ENOENT;
+ 	spin_lock(&dcache_lock);
+ 	if (!d_unlinked(pwd.dentry)) {
+@@ -2111,8 +2112,13 @@ SYSCALL_DEFINE2(getcwd, char __user *, b
+ 		spin_unlock(&dcache_lock);
+ 
+ 		error = PTR_ERR(cwd);
+-		if (IS_ERR(cwd))
++		if (IS_ERR(cwd)) {
++			if ( error == -ENOENT && tryL < tryN ) {
++				tryL++;
++				goto tryAgain;
++			}
+ 			goto out;
++		}
+ 
+ 		error = -ERANGE;
+ 		len = PAGE_SIZE + page - cwd;
+@@ -2121,10 +2127,18 @@ SYSCALL_DEFINE2(getcwd, char __user *, b
+ 			if (copy_to_user(buf, cwd, len))
+ 				error = -EFAULT;
+ 		}
+-	} else
++	} else {
+ 		spin_unlock(&dcache_lock);
++		if ( tryU < tryN ) {
++			tryU++;
++			goto tryAgain;
++		}
++	}
+ 
+ out:
++	if ( tryU != 0 || tryL != 0 )
++		printk( "rjh - sys_getcwd failed - unlinked try %d, linked try %d of %d\n", tryU, tryL, tryN );
++
+ 	path_put(&pwd);
+ 	path_put(&root);
+ 	free_page((unsigned long) page);
+diff -ruNp linux-2.6.32.41.orig/include/linux/jiffies.h linux-2.6.32.41/include/linux/jiffies.h
+--- linux-2.6.32.41.orig/include/linux/jiffies.h	2009-12-15 04:47:25.000000000 +1100
++++ linux-2.6.32.41/include/linux/jiffies.h	2011-06-07 15:07:05.000000000 +1000
+@@ -307,6 +307,8 @@ extern clock_t jiffies_to_clock_t(long x
+ extern unsigned long clock_t_to_jiffies(unsigned long x);
+ extern u64 jiffies_64_to_clock_t(u64 x);
+ extern u64 nsec_to_clock_t(u64 x);
++/* rjh - backported from 2.6.34.6 */
++extern unsigned long nsecs_to_jiffies(u64 n);
+ 
+ #define TIMESTAMP_SIZE	30
+ 
+diff -ruNp linux-2.6.32.41.orig/kernel/sched.c linux-2.6.32.41/kernel/sched.c
+--- linux-2.6.32.41.orig/kernel/sched.c	2011-06-07 15:09:21.000000000 +1000
++++ linux-2.6.32.41/kernel/sched.c	2011-06-07 15:07:05.000000000 +1000
+@@ -5423,8 +5423,8 @@ void thread_group_times(struct task_stru
+ #else
+ 
+ #ifndef nsecs_to_cputime
+-# define nsecs_to_cputime(__nsecs) \
+-	msecs_to_cputime(div_u64((__nsecs), NSEC_PER_MSEC))
++/* rjh - backported from 2.6.34.6 */
++# define nsecs_to_cputime(__nsecs)      nsecs_to_jiffies(__nsecs)
+ #endif
+ 
+ cputime_t task_utime(struct task_struct *p)
+@@ -7177,7 +7177,7 @@ void sched_show_task(struct task_struct 
+ 	unsigned state;
+ 
+ 	state = p->state ? __ffs(p->state) + 1 : 0;
+-	printk(KERN_INFO "%-13.13s %c", p->comm,
++	printk("%-13.13s %c", p->comm,
+ 		state < sizeof(stat_nam) - 1 ? stat_nam[state] : '?');
+ #if BITS_PER_LONG == 32
+ 	if (state == TASK_RUNNING)
+@@ -7205,11 +7205,9 @@ void show_state_filter(unsigned long sta
+ 	struct task_struct *g, *p;
+ 
+ #if BITS_PER_LONG == 32
+-	printk(KERN_INFO
+-		"  task                PC stack   pid father\n");
++	printk("  task                PC stack   pid father\n");
+ #else
+-	printk(KERN_INFO
+-		"  task                        PC stack   pid father\n");
++	printk("  task                        PC stack   pid father\n");
+ #endif
+ 	read_lock(&tasklist_lock);
+ 	do_each_thread(g, p) {
+diff -ruNp linux-2.6.32.41.orig/kernel/signal.c linux-2.6.32.41/kernel/signal.c
+--- linux-2.6.32.41.orig/kernel/signal.c	2011-06-07 15:09:21.000000000 +1000
++++ linux-2.6.32.41/kernel/signal.c	2011-06-07 15:07:05.000000000 +1000
+@@ -988,6 +988,12 @@ int do_send_sig_info(int sig, struct sig
+ 	return ret;
+ }
+ 
++static void rjh_debug_sigbus(struct task_struct *t)
++{       
++        printk("rjh - SIGBUS %s pid %d uid %d\n", t->comm, t->pid, t->real_cred->uid);
++        dump_stack();
++}
++
+ /*
+  * Force a signal that the process can't ignore: if necessary
+  * we unblock the signal and change any SIG_IGN to SIG_DFL.
+@@ -1020,6 +1026,9 @@ force_sig_info(int sig, struct siginfo *
+ 	if (action->sa.sa_handler == SIG_DFL)
+ 		t->signal->flags &= ~SIGNAL_UNKILLABLE;
+ 	ret = specific_send_sig_info(sig, info, t);
++
++        if (sig == SIGBUS) rjh_debug_sigbus(t);
++
+ 	spin_unlock_irqrestore(&t->sighand->siglock, flags);
+ 
+ 	return ret;
+diff -ruNp linux-2.6.32.41.orig/kernel/time.c linux-2.6.32.41/kernel/time.c
+--- linux-2.6.32.41.orig/kernel/time.c	2009-12-15 04:47:25.000000000 +1100
++++ linux-2.6.32.41/kernel/time.c	2011-06-07 15:07:05.000000000 +1000
+@@ -662,6 +662,37 @@ u64 nsec_to_clock_t(u64 x)
+ #endif
+ }
+ 
++/* rjh - backported from 2.6.34.6 */
++/**
++ * nsecs_to_jiffies - Convert nsecs in u64 to jiffies
++ *
++ * @n:  nsecs in u64
++ *
++ * Unlike {m,u}secs_to_jiffies, type of input is not unsigned int but u64.
++ * And this doesn't return MAX_JIFFY_OFFSET since this function is designed
++ * for scheduler, not for use in device drivers to calculate timeout value.
++ *
++ * note:
++ *   NSEC_PER_SEC = 10^9 = (5^9 * 2^9) = (1953125 * 512)
++ *   ULLONG_MAX ns = 18446744073.709551615 secs = about 584 years
++ */
++unsigned long nsecs_to_jiffies(u64 n)
++{
++#if (NSEC_PER_SEC % HZ) == 0
++        /* Common case, HZ = 100, 128, 200, 250, 256, 500, 512, 1000 etc. */
++        return div_u64(n, NSEC_PER_SEC / HZ);
++#elif (HZ % 512) == 0
++        /* overflow after 292 years if HZ = 1024 */
++        return div_u64(n * HZ / 512, NSEC_PER_SEC / 512);
++#else
++        /*
++         * Generic case - optimized for cases where HZ is a multiple of 3.
++         * overflow after 64.99 years, exact for HZ = 60, 72, 90, 120 etc.
++         */
++        return div_u64(n * 9, (9ull * NSEC_PER_SEC + HZ / 2) / HZ);
++#endif
++}
++
+ #if (BITS_PER_LONG < 64)
+ u64 get_jiffies_64(void)
+ {
+diff -ruNp linux-2.6.32.41.orig/security/device_cgroup.c linux-2.6.32.41/security/device_cgroup.c
+--- linux-2.6.32.41.orig/security/device_cgroup.c	2009-12-15 04:47:25.000000000 +1100
++++ linux-2.6.32.41/security/device_cgroup.c	2011-06-07 15:07:05.000000000 +1000
+@@ -13,14 +13,26 @@
+ #include <linux/rcupdate.h>
+ #include <linux/mutex.h>
+ 
+-#define ACC_MKNOD 1
+-#define ACC_READ  2
+-#define ACC_WRITE 4
+-#define ACC_MASK (ACC_MKNOD | ACC_READ | ACC_WRITE)
++#define ACC_ALLOW_MKNOD 1
++#define ACC_ALLOW_READ  2
++#define ACC_ALLOW_WRITE 4
++#define ACC_DENY_MKNOD 8
++#define ACC_DENY_READ  16
++#define ACC_DENY_WRITE 32
++#define ACC_ALLOW_MASK (ACC_ALLOW_MKNOD | ACC_ALLOW_READ | ACC_ALLOW_WRITE)
++#define ACC_DENY_MASK (ACC_DENY_MKNOD | ACC_DENY_READ | ACC_DENY_WRITE)
++/* right-shift amount to convert ACC_DENY_FOO into ACC_ALLOW_FOO */
++#define ACC_DENY_OFFSET 3
+ 
+ #define DEV_BLOCK 1
+ #define DEV_CHAR  2
+ #define DEV_ALL   4  /* this represents all devices */
++#define DEV_NONE  8  /* this represents no devices */
++
++#define DEVCG_APPEND 1
++#define DEVCG_PREPEND 2
++#define DEVCG_REMOVE 3
++#define DEVCG_LIST 4
+ 
+ static DEFINE_MUTEX(devcgroup_mutex);
+ 
+@@ -99,10 +111,11 @@ free_and_exit:
+  * called under devcgroup_mutex
+  */
+ static int dev_whitelist_add(struct dev_cgroup *dev_cgroup,
+-			struct dev_whitelist_item *wh)
++			struct dev_whitelist_item *wh, int filetype)
+ {
+ 	struct dev_whitelist_item *whcopy, *walk;
+ 
++	/* FIXME: Only copy if necessary */
+ 	whcopy = kmemdup(wh, sizeof(*wh), GFP_KERNEL);
+ 	if (!whcopy)
+ 		return -ENOMEM;
+@@ -120,8 +133,17 @@ static int dev_whitelist_add(struct dev_
+ 		whcopy = NULL;
+ 	}
+ 
+-	if (whcopy != NULL)
+-		list_add_tail_rcu(&whcopy->list, &dev_cgroup->whitelist);
++	if (whcopy != NULL) {
++		switch (filetype) {
++			case DEVCG_PREPEND:
++				list_add_rcu(&whcopy->list, &dev_cgroup->whitelist);
++				break;
++			case DEVCG_APPEND:
++			default:
++				list_add_tail_rcu(&whcopy->list, &dev_cgroup->whitelist);
++				break;
++		}
++	}
+ 	return 0;
+ }
+ 
+@@ -142,7 +164,7 @@ static void dev_whitelist_rm(struct dev_
+ 	struct dev_whitelist_item *walk, *tmp;
+ 
+ 	list_for_each_entry_safe(walk, tmp, &dev_cgroup->whitelist, list) {
+-		if (walk->type == DEV_ALL)
++		if (walk->type == DEV_ALL || walk->type == DEV_NONE)
+ 			goto remove;
+ 		if (walk->type != wh->type)
+ 			continue;
+@@ -161,6 +183,91 @@ remove:
+ }
+ 
+ /*
++ * may_access_whitelist:
++ * does the access granted to dev_cgroup c contain the access
++ * requested in whitelist item refwh.
++ * return 1 if yes, 0 if no.
++ * call with devcgroup_mutex held
++ */
++static int may_access_whitelist(struct dev_cgroup *c,
++				       struct dev_whitelist_item *refwh, int remove)
++{
++	struct dev_whitelist_item *whitem;
++	short access_sought;
++
++	if (remove) {
++		/* Convert the deny access that is being removed into allow access,
++		 * since access is denied by default unless granted by some rule.  */
++		access_sought = (refwh->access & ACC_DENY_MASK) >> ACC_DENY_OFFSET;
++	} else {
++		access_sought = refwh->access & ACC_ALLOW_MASK;
++	}
++
++	if (!access_sought) {
++		/* Adding a rule that only denies access is not seeking additional access.
++		 * Likewise, removing a rule that only allows access.
++		 * These are strictly reducing the access, so they are fine.  */
++		return 1;
++	}
++
++	list_for_each_entry(whitem, &c->whitelist, list) {
++		if (whitem->type & DEV_ALL)
++			goto allow;
++		if (whitem->type & DEV_NONE)
++			goto deny;
++		if ((refwh->type & DEV_BLOCK) && !(whitem->type & DEV_BLOCK))
++			continue;
++		if ((refwh->type & DEV_CHAR) && !(whitem->type & DEV_CHAR))
++			continue;
++		if (whitem->major != ~0 && whitem->major != refwh->major)
++			continue;
++		if (whitem->minor != ~0 && whitem->minor != refwh->minor)
++			continue;
++		/* If a rule specifically denies the access being sought... */
++		if ((access_sought << ACC_DENY_OFFSET) & whitem->access)
++			goto deny;
++		if (access_sought & (~whitem->access))
++			continue;
++allow:
++		return 1;
++	}
++deny:
++	return 0;
++}
++
++/*
++ * parent_has_perm:
++ * when adding a new allow rule to a device whitelist, the rule
++ * must be allowed in the parent device
++ */
++static int parent_has_perm(struct dev_cgroup *childcg,
++				  struct dev_whitelist_item *wh, int remove)
++{
++	struct cgroup *pcg = childcg->css.cgroup->parent;
++	struct dev_cgroup *parent;
++
++	if (!pcg)
++		return 1;
++	parent = cgroup_to_devcgroup(pcg);
++	return may_access_whitelist(parent, wh, remove);
++}
++
++/*
++ * called under devcgroup_mutex
++ */
++static void dev_whitelist_clear(struct dev_cgroup *dev_cgroup)
++{
++	struct dev_whitelist_item *walk, *tmp;
++
++	list_for_each_entry_safe(walk, tmp, &dev_cgroup->whitelist, list) {
++		if (!parent_has_perm(dev_cgroup, walk, 1))
++			continue;
++		list_del_rcu(&walk->list);
++		call_rcu(&walk->rcu, whitelist_item_free);
++	}
++}
++
++/*
+  * called from kernel/cgroup.c with cgroup_lock() held.
+  */
+ static struct cgroup_subsys_state *devcgroup_create(struct cgroup_subsys *ss,
+@@ -185,7 +292,7 @@ static struct cgroup_subsys_state *devcg
+ 		}
+ 		wh->minor = wh->major = ~0;
+ 		wh->type = DEV_ALL;
+-		wh->access = ACC_MASK;
++		wh->access = ACC_ALLOW_MASK;
+ 		list_add(&wh->list, &dev_cgroup->whitelist);
+ 	} else {
+ 		parent_dev_cgroup = cgroup_to_devcgroup(parent_cgroup);
+@@ -216,27 +323,35 @@ static void devcgroup_destroy(struct cgr
+ 	kfree(dev_cgroup);
+ }
+ 
+-#define DEVCG_ALLOW 1
+-#define DEVCG_DENY 2
+-#define DEVCG_LIST 3
+-
+ #define MAJMINLEN 13
+-#define ACCLEN 4
++#define ACCLEN 9
+ 
+ static void set_access(char *acc, short access)
+ {
+ 	int idx = 0;
+ 	memset(acc, 0, ACCLEN);
+-	if (access & ACC_READ)
++	if ((access & ACC_ALLOW_MASK) && (access & ACC_DENY_MASK))
++		acc[idx++] = '+';
++	if (access & ACC_ALLOW_READ)
++		acc[idx++] = 'r';
++	if (access & ACC_ALLOW_WRITE)
++		acc[idx++] = 'w';
++	if (access & ACC_ALLOW_MKNOD)
++		acc[idx++] = 'm';
++	if (access & ACC_DENY_MASK)
++		acc[idx++] = '-';
++	if (access & ACC_DENY_READ)
+ 		acc[idx++] = 'r';
+-	if (access & ACC_WRITE)
++	if (access & ACC_DENY_WRITE)
+ 		acc[idx++] = 'w';
+-	if (access & ACC_MKNOD)
++	if (access & ACC_DENY_MKNOD)
+ 		acc[idx++] = 'm';
+ }
+ 
+ static char type_to_char(short type)
+ {
++	if (type == DEV_NONE)
++		return 'n';
+ 	if (type == DEV_ALL)
+ 		return 'a';
+ 	if (type == DEV_CHAR)
+@@ -275,53 +390,6 @@ static int devcgroup_seq_read(struct cgr
+ }
+ 
+ /*
+- * may_access_whitelist:
+- * does the access granted to dev_cgroup c contain the access
+- * requested in whitelist item refwh.
+- * return 1 if yes, 0 if no.
+- * call with devcgroup_mutex held
+- */
+-static int may_access_whitelist(struct dev_cgroup *c,
+-				       struct dev_whitelist_item *refwh)
+-{
+-	struct dev_whitelist_item *whitem;
+-
+-	list_for_each_entry(whitem, &c->whitelist, list) {
+-		if (whitem->type & DEV_ALL)
+-			return 1;
+-		if ((refwh->type & DEV_BLOCK) && !(whitem->type & DEV_BLOCK))
+-			continue;
+-		if ((refwh->type & DEV_CHAR) && !(whitem->type & DEV_CHAR))
+-			continue;
+-		if (whitem->major != ~0 && whitem->major != refwh->major)
+-			continue;
+-		if (whitem->minor != ~0 && whitem->minor != refwh->minor)
+-			continue;
+-		if (refwh->access & (~whitem->access))
+-			continue;
+-		return 1;
+-	}
+-	return 0;
+-}
+-
+-/*
+- * parent_has_perm:
+- * when adding a new allow rule to a device whitelist, the rule
+- * must be allowed in the parent device
+- */
+-static int parent_has_perm(struct dev_cgroup *childcg,
+-				  struct dev_whitelist_item *wh)
+-{
+-	struct cgroup *pcg = childcg->css.cgroup->parent;
+-	struct dev_cgroup *parent;
+-
+-	if (!pcg)
+-		return 1;
+-	parent = cgroup_to_devcgroup(pcg);
+-	return may_access_whitelist(parent, wh);
+-}
+-
+-/*
+  * Modify the whitelist using allow/deny rules.
+  * CAP_SYS_ADMIN is needed for this.  It's at least separate from CAP_MKNOD
+  * so we can give a container CAP_MKNOD to let it create devices but not
+@@ -341,17 +409,30 @@ static int devcgroup_update_access(struc
+ 	char *endp;
+ 	int count;
+ 	struct dev_whitelist_item wh;
++	short mode_mask;
++	int clear;
+ 
+ 	if (!capable(CAP_SYS_ADMIN))
+ 		return -EPERM;
+ 
+ 	memset(&wh, 0, sizeof(wh));
+ 	b = buffer;
++	clear = 0;
+ 
+ 	switch (*b) {
++	case 'A':
++	case '*':
++		clear = 1;
++		goto handle;
+ 	case 'a':
+ 		wh.type = DEV_ALL;
+-		wh.access = ACC_MASK;
++		wh.access = ACC_ALLOW_MASK;
++		wh.major = ~0;
++		wh.minor = ~0;
++		goto handle;
++	case 'n':
++		wh.type = DEV_NONE;
++		wh.access = ACC_DENY_MASK;
+ 		wh.major = ~0;
+ 		wh.minor = ~0;
+ 		goto handle;
+@@ -393,20 +474,28 @@ static int devcgroup_update_access(struc
+ 	}
+ 	if (!isspace(*b))
+ 		return -EINVAL;
+-	for (b++, count = 0; count < 3; count++, b++) {
++	/* The new format is: [+]rwm[-rwm] with the obvious meaning */
++	mode_mask = ACC_ALLOW_MASK;
++	for (b++, count = 0; count < 8; count++, b++) {
+ 		switch (*b) {
++		case '+':
++			mode_mask = ACC_ALLOW_MASK;
++			break;
++		case '-':
++			mode_mask = ACC_DENY_MASK;
++			break;
+ 		case 'r':
+-			wh.access |= ACC_READ;
++			wh.access |= (ACC_ALLOW_READ | ACC_DENY_READ) & mode_mask;
+ 			break;
+ 		case 'w':
+-			wh.access |= ACC_WRITE;
++			wh.access |= (ACC_ALLOW_WRITE | ACC_DENY_WRITE) & mode_mask;
+ 			break;
+ 		case 'm':
+-			wh.access |= ACC_MKNOD;
++			wh.access |= (ACC_ALLOW_MKNOD | ACC_DENY_MKNOD) & mode_mask;
+ 			break;
+ 		case '\n':
+ 		case '\0':
+-			count = 3;
++			count = 8;
+ 			break;
+ 		default:
+ 			return -EINVAL;
+@@ -415,12 +504,23 @@ static int devcgroup_update_access(struc
+ 
+ handle:
+ 	switch (filetype) {
+-	case DEVCG_ALLOW:
+-		if (!parent_has_perm(devcgroup, &wh))
++	case DEVCG_APPEND:
++	case DEVCG_PREPEND:
++		if (!parent_has_perm(devcgroup, &wh, 0))
+ 			return -EPERM;
+-		return dev_whitelist_add(devcgroup, &wh);
+-	case DEVCG_DENY:
+-		dev_whitelist_rm(devcgroup, &wh);
++		return dev_whitelist_add(devcgroup, &wh, filetype);
++	case DEVCG_REMOVE:
++		if (clear) {
++			dev_whitelist_clear(devcgroup);
++		} else {
++			/* Removing a rule that denies access is the same as adding a
++			 * rulethat grants access.  Thus, removing a rule might allow
++			 * the cgroup to access more than its parent.
++			 * So parent_has_perm() needs to be checked here as well. */
++			if (!parent_has_perm(devcgroup, &wh, 1))
++				return -EPERM;
++			dev_whitelist_rm(devcgroup, &wh);
++		}
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -442,20 +542,36 @@ static int devcgroup_access_write(struct
+ 
+ static struct cftype dev_cgroup_files[] = {
+ 	{
+-		.name = "allow",
++		.name = "append",
+ 		.write_string  = devcgroup_access_write,
+-		.private = DEVCG_ALLOW,
++		.private = DEVCG_APPEND,
+ 	},
+ 	{
+-		.name = "deny",
++		.name = "prepend",
++		.write_string  = devcgroup_access_write,
++		.private = DEVCG_PREPEND,
++	},
++	{
++		.name = "remove",
+ 		.write_string = devcgroup_access_write,
+-		.private = DEVCG_DENY,
++		.private = DEVCG_REMOVE,
+ 	},
+ 	{
+ 		.name = "list",
+ 		.read_seq_string = devcgroup_seq_read,
+ 		.private = DEVCG_LIST,
+ 	},
++	/* Deprecated */
++	{
++		.name = "allow",
++		.write_string  = devcgroup_access_write,
++		.private = DEVCG_APPEND,
++	},
++	{
++		.name = "deny",
++		.write_string = devcgroup_access_write,
++		.private = DEVCG_REMOVE,
++	},
+ };
+ 
+ static int devcgroup_populate(struct cgroup_subsys *ss,
+@@ -491,7 +607,9 @@ int devcgroup_inode_permission(struct in
+ 
+ 	list_for_each_entry_rcu(wh, &dev_cgroup->whitelist, list) {
+ 		if (wh->type & DEV_ALL)
+-			goto found;
++			goto allow;
++		if (wh->type & DEV_NONE)
++			goto deny;
+ 		if ((wh->type & DEV_BLOCK) && !S_ISBLK(inode->i_mode))
+ 			continue;
+ 		if ((wh->type & DEV_CHAR) && !S_ISCHR(inode->i_mode))
+@@ -501,17 +619,21 @@ int devcgroup_inode_permission(struct in
+ 		if (wh->minor != ~0 && wh->minor != iminor(inode))
+ 			continue;
+ 
+-		if ((mask & MAY_WRITE) && !(wh->access & ACC_WRITE))
+-			continue;
+-		if ((mask & MAY_READ) && !(wh->access & ACC_READ))
++		if ((mask & MAY_WRITE) && (wh->access & ACC_DENY_WRITE))
++			goto deny;
++		if ((mask & MAY_WRITE) && !(wh->access & ACC_ALLOW_WRITE))
++			continue;
++		if ((mask & MAY_READ) && (wh->access & ACC_DENY_READ))
++			goto deny;
++		if ((mask & MAY_READ) && !(wh->access & ACC_ALLOW_READ))
+ 			continue;
+-found:
++allow:
+ 		rcu_read_unlock();
+ 		return 0;
+ 	}
+ 
++deny:
+ 	rcu_read_unlock();
+-
+ 	return -EPERM;
+ }
+ 
+@@ -529,7 +651,9 @@ int devcgroup_inode_mknod(int mode, dev_
+ 
+ 	list_for_each_entry_rcu(wh, &dev_cgroup->whitelist, list) {
+ 		if (wh->type & DEV_ALL)
+-			goto found;
++			goto allow;
++		if (wh->type & DEV_NONE)
++			goto deny;
+ 		if ((wh->type & DEV_BLOCK) && !S_ISBLK(mode))
+ 			continue;
+ 		if ((wh->type & DEV_CHAR) && !S_ISCHR(mode))
+@@ -539,14 +663,16 @@ int devcgroup_inode_mknod(int mode, dev_
+ 		if (wh->minor != ~0 && wh->minor != MINOR(dev))
+ 			continue;
+ 
+-		if (!(wh->access & ACC_MKNOD))
++		if (wh->access & ACC_DENY_MKNOD)
++			goto deny;
++		if (!(wh->access & ACC_ALLOW_MKNOD))
+ 			continue;
+-found:
++allow:
+ 		rcu_read_unlock();
+ 		return 0;
+ 	}
+ 
++deny:
+ 	rcu_read_unlock();
+-
+ 	return -EPERM;
+ }

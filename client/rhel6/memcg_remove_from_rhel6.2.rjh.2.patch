@@ -1,0 +1,23 @@
+--- linux-2.6.32-220.2.1.el6.x86_64.orig/mm/huge_memory.c	2012-01-11 01:12:34.000000000 +1100
++++ linux-2.6.32-220.2.1.el6.x86_64/mm/huge_memory.c	2012-01-11 01:12:58.000000000 +1100
+@@ -1234,7 +1234,6 @@
+ 		BUG_ON(!PageDirty(page_tail));
+ 		BUG_ON(!PageSwapBacked(page_tail));
+ 
+-		mem_cgroup_split_hugepage_commit(page_tail, page);
+ 		lru_add_page_tail(zone, page, page_tail);
+ 	}
+ 	atomic_sub(tail_count, &page->_count);
+--- linux-2.6.32-220.2.1.el6.x86_64.orig/include/linux/memcontrol.h	2012-01-11 01:12:45.000000000 +1100
++++ linux-2.6.32-220.2.1.el6.x86_64/include/linux/memcontrol.h	2012-01-11 01:13:09.000000000 +1100
+@@ -299,9 +299,7 @@
+ 	return 0;
+ }
+ 
+-void mem_cgroup_split_hugepage_commit(struct page *page, struct page *head)
+-{
+-}
++void mem_cgroup_split_hugepage_commit(struct page *page, struct page *head);
+ 
+ static inline
+ u64 mem_cgroup_get_limit(struct mem_cgroup *mem)

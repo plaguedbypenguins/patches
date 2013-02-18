@@ -1,0 +1,12 @@
+--- linux-2.6.32-220.7.1.el6.x86_64.zfs+lustrePatches/drivers/md/raid5.c	2012-03-13 00:52:37.000000000 +1100
++++ linux-2.6.32-220.7.1.el6.x86_64.zfs/drivers/md/raid5.c	2012-03-20 02:27:41.000000000 +1100
+@@ -5212,6 +5212,9 @@ static int run(mddev_t *mddev)
+ 		blk_queue_io_min(mddev->queue, chunk_size);
+ 		blk_queue_io_opt(mddev->queue, chunk_size *
+ 				 (conf->raid_disks - conf->max_degraded));
++// rjh - added
++		blk_queue_max_hw_sectors(mddev->queue, (chunk_size *
++			(conf->raid_disks - conf->max_degraded)) >> 9);
+ 
+ 		list_for_each_entry(rdev, &mddev->disks, same_set)
+ 			disk_stack_limits(mddev->gendisk, rdev->bdev,

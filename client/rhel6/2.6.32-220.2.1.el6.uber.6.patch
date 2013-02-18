@@ -1,0 +1,118 @@
+diff -ruNp linux-2.6.32-220.2.1.el6.x86_64.orig/arch/x86/include/asm/dma.h linux-2.6.32-220.2.1.el6.x86_64/arch/x86/include/asm/dma.h
+--- linux-2.6.32-220.2.1.el6.x86_64.orig/arch/x86/include/asm/dma.h	2012-01-11 20:29:48.000000000 +1100
++++ linux-2.6.32-220.2.1.el6.x86_64/arch/x86/include/asm/dma.h	2012-01-11 20:31:54.000000000 +1100
+@@ -78,10 +78,10 @@
+ #else
+ 
+ /* 16MB ISA DMA zone */
+-#define MAX_DMA_PFN   ((16 * 1024 * 1024) >> PAGE_SHIFT)
++#define MAX_DMA_PFN   ((0 * 1024 * 1024) >> PAGE_SHIFT)
+ 
+ /* 4GB broken PCI/AGP hardware bus master zone */
+-#define MAX_DMA32_PFN ((4UL * 1024 * 1024 * 1024) >> PAGE_SHIFT)
++#define MAX_DMA32_PFN ((0 * 1024 * 1024 * 1024) >> PAGE_SHIFT)
+ 
+ /* Compat define for old dma zone */
+ #define MAX_DMA_ADDRESS ((unsigned long)__va(MAX_DMA_PFN << PAGE_SHIFT))
+diff -ruNp linux-2.6.32-220.2.1.el6.x86_64.orig/drivers/block/loop.c linux-2.6.32-220.2.1.el6.x86_64/drivers/block/loop.c
+--- linux-2.6.32-220.2.1.el6.x86_64.orig/drivers/block/loop.c	2012-01-11 20:30:27.000000000 +1100
++++ linux-2.6.32-220.2.1.el6.x86_64/drivers/block/loop.c	2012-01-11 22:47:39.000000000 +1100
+@@ -782,10 +782,6 @@ static int loop_set_fd(struct loop_devic
+ 
+ 	error = -EINVAL;
+ 	if (S_ISREG(inode->i_mode) || S_ISBLK(inode->i_mode)) {
+-		const struct address_space_operations *aops = mapping->a_ops;
+-
+-		if (aops->write_begin)
+-			lo_flags |= LO_FLAGS_USE_AOPS;
+ 		if (!(lo_flags & LO_FLAGS_USE_AOPS) && !file->f_op->write)
+ 			lo_flags |= LO_FLAGS_READ_ONLY;
+ 
+diff -ruNp linux-2.6.32-220.2.1.el6.x86_64.orig/fs/dcache.c linux-2.6.32-220.2.1.el6.x86_64/fs/dcache.c
+--- linux-2.6.32-220.2.1.el6.x86_64.orig/fs/dcache.c	2012-01-11 20:30:27.000000000 +1100
++++ linux-2.6.32-220.2.1.el6.x86_64/fs/dcache.c	2012-01-11 20:38:29.000000000 +1100
+@@ -2110,7 +2110,7 @@ Elong:
+  */
+ SYSCALL_DEFINE2(getcwd, char __user *, buf, unsigned long, size)
+ {
+-	int error;
++	int error, tryL = 0, tryU = 0, tryN = 5;
+ 	struct path pwd, root;
+ 	char *page = (char *) __get_free_page(GFP_USER);
+ 
+@@ -2124,6 +2124,7 @@ SYSCALL_DEFINE2(getcwd, char __user *, b
+ 	path_get(&root);
+ 	read_unlock(&current->fs->lock);
+ 
++tryAgain:
+ 	error = -ENOENT;
+ 	spin_lock(&dcache_lock);
+ 	if (!d_unlinked(pwd.dentry)) {
+@@ -2135,8 +2136,13 @@ SYSCALL_DEFINE2(getcwd, char __user *, b
+ 		spin_unlock(&dcache_lock);
+ 
+ 		error = PTR_ERR(cwd);
+-		if (IS_ERR(cwd))
++		if (IS_ERR(cwd)) {
++			if ( error == -ENOENT && tryL < tryN ) {
++				tryL++;
++				goto tryAgain;
++			}
+ 			goto out;
++		}
+ 
+ 		error = -ERANGE;
+ 		len = PAGE_SIZE + page - cwd;
+@@ -2145,10 +2151,18 @@ SYSCALL_DEFINE2(getcwd, char __user *, b
+ 			if (copy_to_user(buf, cwd, len))
+ 				error = -EFAULT;
+ 		}
+-	} else
++	} else {
+ 		spin_unlock(&dcache_lock);
+-
++		if ( tryU < tryN ) {
++			tryU++;
++			goto tryAgain;
++		}
++	}
++ 
+ out:
++	if ( tryU != 0 || tryL != 0 )
++		printk( "rjh - sys_getcwd failed - unlinked try %d, linked try %d of %d\n", tryU, tryL, tryN );
++
+ 	path_put(&pwd);
+ 	path_put(&root);
+ 	free_page((unsigned long) page);
+diff -ruNp linux-2.6.32-220.2.1.el6.x86_64.orig/include/linux/jiffies.h linux-2.6.32-220.2.1.el6.x86_64/include/linux/jiffies.h
+diff -ruNp linux-2.6.32-220.2.1.el6.x86_64.orig/kernel/sched.c linux-2.6.32-220.2.1.el6.x86_64/kernel/sched.c
+--- linux-2.6.32-220.2.1.el6.x86_64.orig/kernel/sched.c	2012-01-11 20:30:27.000000000 +1100
++++ linux-2.6.32-220.2.1.el6.x86_64/kernel/sched.c	2012-01-11 20:41:10.000000000 +1100
+@@ -7436,7 +7436,7 @@ void sched_show_task(struct task_struct 
+ 	unsigned state;
+ 
+ 	state = p->state ? __ffs(p->state) + 1 : 0;
+-	printk(KERN_INFO "%-13.13s %c", p->comm,
++	printk("%-13.13s %c", p->comm,
+ 		state < sizeof(stat_nam) - 1 ? stat_nam[state] : '?');
+ #if BITS_PER_LONG == 32
+ 	if (state == TASK_RUNNING)
+@@ -7464,11 +7464,9 @@ void show_state_filter(unsigned long sta
+ 	struct task_struct *g, *p;
+ 
+ #if BITS_PER_LONG == 32
+-	printk(KERN_INFO
+-		"  task                PC stack   pid father\n");
++	printk("  task                PC stack   pid father\n");
+ #else
+-	printk(KERN_INFO
+-		"  task                        PC stack   pid father\n");
++	printk("  task                        PC stack   pid father\n");
+ #endif
+ 	read_lock(&tasklist_lock);
+ 	do_each_thread(g, p) {
+diff -ruNp linux-2.6.32-220.2.1.el6.x86_64.orig/kernel/signal.c linux-2.6.32-220.2.1.el6.x86_64/kernel/signal.c
+diff -ruNp linux-2.6.32-220.2.1.el6.x86_64.orig/kernel/time.c linux-2.6.32-220.2.1.el6.x86_64/kernel/time.c
+diff -ruNp linux-2.6.32-220.2.1.el6.x86_64.orig/security/device_cgroup.c linux-2.6.32-220.2.1.el6.x86_64/security/device_cgroup.c
+diff -ruNp linux-2.6.32-220.2.1.el6.x86_64.orig/include/linux/jiffies.h linux-2.6.32-220.2.1.el6.x86_64/include/linux/jiffies.h
+diff -ruNp linux-2.6.32-220.2.1.el6.x86_64.orig/kernel/time.c linux-2.6.32-220.2.1.el6.x86_64/kernel/time.c
