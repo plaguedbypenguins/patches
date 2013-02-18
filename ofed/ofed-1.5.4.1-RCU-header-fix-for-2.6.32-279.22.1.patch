@@ -1,0 +1,11 @@
+--- ofa_kernel-1.5.4.1.orig/kernel_addons/backport/2.6.32-EL6.1/include/linux/rcupdate.h	2012-02-07 11:22:09.000000000 -0500
++++ ofa_kernel-1.5.4.1/kernel_addons/backport/2.6.32-EL6.1/include/linux/rcupdate.h	2013-02-05 22:58:58.000000000 -0500
+@@ -3,6 +3,7 @@
+ 
+ #include_next <linux/rcupdate.h>
+ 
+-#define RCU_INIT_POINTER(p, v) p = v
++// rjh - commented out
++// #define RCU_INIT_POINTER(p, v) p = v
+ 
+ #endif /*__RCPUPATE__BACKPORT_H_TO_2_6_36___ */
