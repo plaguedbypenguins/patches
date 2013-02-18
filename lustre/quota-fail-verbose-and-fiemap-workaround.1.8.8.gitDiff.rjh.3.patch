@@ -1,0 +1,109 @@
+diff --git a/lustre/llite/file.c b/lustre/llite/file.c
+index 750de2b..05e3934 100644
+--- a/lustre/llite/file.c
++++ b/lustre/llite/file.c
+@@ -2853,8 +2853,14 @@ int ll_do_fiemap(struct inode *inode, struct ll_user_fiemap *fiemap,
+         memcpy(&fm_key.fiemap, fiemap, sizeof(*fiemap));
+ 
+         rc = obd_get_info(exp, sizeof(fm_key), &fm_key, &vallen, fiemap, lsm);
+-        if (rc)
+-                CERROR("obd_get_info failed: rc = %d\n", rc);
++        if (rc) {
++                if (rc == -EINVAL) { /* rjh - return EINVAL when stripe_count == -1 */
++                        CERROR("rjh: obd_get_info failed: rc = %d. making it -EOPNOTSUPP instead\n", rc);
++                        rc = -EOPNOTSUPP;
++                }
++                else
++                        CERROR("obd_get_info failed: rc = %d\n", rc);
++        }
+ 
+         RETURN(rc);
+ }
+diff --git a/lustre/llite/llite_lib.c b/lustre/llite/llite_lib.c
+index 891ee0e..18b3d31 100644
+--- a/lustre/llite/llite_lib.c
++++ b/lustre/llite/llite_lib.c
+@@ -1574,6 +1574,11 @@ int ll_setattr_raw(struct inode *inode, struct iattr *attr)
+                         if (!S_ISREG(inode->i_mode) &&
+                             !S_ISDIR(inode->i_mode))
+                                 rc = inode_setattr(inode, attr);
++                } else if (rc == -EDQUOT) {  // rjh - give information when over inode quota
++                        if (ll_i2mdcexp(inode) && ll_i2mdcexp(inode)->exp_obd && ll_i2mdcexp(inode)->exp_obd->obd_name) {
++                                CERROR("mdc_setattr fails: inode over quota: uid %d gid %d, dev %s\n", inode->i_uid, inode->i_gid, ll_i2mdcexp(inode)->exp_obd->obd_name);
++                        } else
++                                CERROR("mdc_setattr fails: inode over quota: uid %d gid %d\n", inode->i_uid, inode->i_gid);
+                 } else if (rc != -EPERM && rc != -EACCES && rc != -ETXTBSY)
+                         CERROR("mdc_setattr fails: rc = %d\n", rc);
+                 OBD_FREE_PTR(op_data);
+diff --git a/lustre/lov/lov_obd.c b/lustre/lov/lov_obd.c
+index ceadeb3..fe72563 100644
+--- a/lustre/lov/lov_obd.c
++++ b/lustre/lov/lov_obd.c
+@@ -2784,6 +2784,13 @@ static int lov_fiemap(struct lov_obd *lov, __u32 keylen, void *key,
+         fm_end_offset = fiemap_calc_fm_end_offset(fiemap, lsm, fm_start, fm_end,
+                                                   &start_stripe);
+ 
++        /* rjh - hack hack hack - workaround some sort of a race in 1.8.7 servers? */
++        if (start_stripe == -1) {
++                /* printk("rjh: fiemap start_stripe == -1. return unknown fiemap\n"); */
++                GOTO(out, rc = -EINVAL);
++                /* could also try using code from 'OST is inactive' below */
++        }
++
+         if (fiemap->fm_extent_count == 0) {
+                 get_num_extents = 1;
+                 count_local = 0;
+diff --git a/lustre/osc/osc_request.c b/lustre/osc/osc_request.c
+index 9be8ee1..615471a 100644
+--- a/lustre/osc/osc_request.c
++++ b/lustre/osc/osc_request.c
+@@ -3055,8 +3055,11 @@ static int osc_queue_async_io(struct obd_export *exp, struct lov_stripe_md *lsm,
+                 ops = oap->oap_caller_ops;
+                 ops->ap_fill_obdo(oap->oap_caller_data, cmd, oa);
+                 if (lquota_chkdq(quota_interface, cli, oa->o_uid, oa->o_gid) ==
+-                    NO_QUOTA)
++                    NO_QUOTA) {
++                        /* rjh - print quota error message */
++                        LCONSOLE_ERROR_MSG(0x011,"write quota error occurred for uid %d gid %d\n", oa->o_uid, oa->o_gid);
+                         rc = -EDQUOT;
++                }
+ 
+                 OBDO_FREE(oa);
+                 if (rc)
+diff --git a/lustre/ptlrpc/client.c b/lustre/ptlrpc/client.c
+index d2819fb..7b695ba 100644
+--- a/lustre/ptlrpc/client.c
++++ b/lustre/ptlrpc/client.c
+@@ -965,13 +965,30 @@ static int ptlrpc_check_status(struct ptlrpc_request *req)
+                 struct obd_import *imp = req->rq_import;
+                 __u32 opc = lustre_msg_get_opc(req->rq_reqmsg);
+ 
+-                if (ptlrpc_console_allow(req))
+-                        LCONSOLE_ERROR_MSG(0x011,"an error occurred while "
++                if (ptlrpc_console_allow(req)) {
++                        if (err != -EDQUOT)
++                                LCONSOLE_ERROR_MSG(0x011,"an error occurred while "
+                                            "communicating with %s. The %s "
+                                            "operation failed with %d\n",
+                                            libcfs_nid2str(
+                                            imp->imp_connection->c_peer.nid),
+                                            ll_opcode2str(opc), err);
++                        else {  // rjh - give a meaningful error when over quota
++                                LCONSOLE_ERROR_MSG(0x011,"an quota error occurred while "
++                                           "communicating with %s. The %s "
++                                           "operation failed to %s\n",
++                                           libcfs_nid2str(
++                                           imp->imp_connection->c_peer.nid),
++                                           ll_opcode2str(opc), imp->imp_obd->obd_name);
++
++/* how to get uid/gid????
++   or is this even still the right error code path with 'fixed' quotas in lustre 1.8.7?
++obd_import->obd_device->obdo->o_uid, o_gid
++inode->o_gid
++*/
++
++                        }
++                }
+ 
+                 RETURN(err < 0 ? err : -EINVAL);
+         }

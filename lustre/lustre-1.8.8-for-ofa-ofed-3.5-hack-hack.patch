@@ -1,0 +1,32 @@
+diff --git a/lnet/autoconf/lustre-lnet.m4 b/lnet/autoconf/lustre-lnet.m4
+index a2cfd57..a59ab44 100644
+--- a/lnet/autoconf/lustre-lnet.m4
++++ b/lnet/autoconf/lustre-lnet.m4
+@@ -560,6 +560,7 @@ else
+ 		        #if !HAVE_GFP_T
+ 		        typedef int gfp_t;
+ 		        #endif
++		        #include <linux/compat-2.6.h>
+ 		        #include <rdma/rdma_cm.h>
+ 		        #include <rdma/ib_cm.h>
+ 		        #include <rdma/ib_verbs.h>
+@@ -625,6 +626,7 @@ AC_SUBST(O2IBLND)
+ if test $ENABLEO2IB -ne 0; then
+ 	AC_MSG_CHECKING([if rdma_create_id wants four args])
+ 	LB_LINUX_TRY_COMPILE([
++	        #include <linux/compat-2.6.h>
+ 		#include <rdma/rdma_cm.h>
+ 	],[
+ 		rdma_create_id(NULL, NULL, 0, 0);
+diff --git a/lnet/klnds/o2iblnd/o2iblnd.h b/lnet/klnds/o2iblnd/o2iblnd.h
+index a5ad46d..373d102 100644
+--- a/lnet/klnds/o2iblnd/o2iblnd.h
++++ b/lnet/klnds/o2iblnd/o2iblnd.h
+@@ -85,6 +85,7 @@
+ typedef int gfp_t;
+ #endif
+ 
++#include <linux/compat-2.6.h>
+ #include <rdma/rdma_cm.h>
+ #include <rdma/ib_cm.h>
+ #include <rdma/ib_verbs.h>
